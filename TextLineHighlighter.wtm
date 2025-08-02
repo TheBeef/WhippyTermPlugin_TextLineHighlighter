@@ -1,0 +1,19 @@
+<?xml version="1.0" standalone="no" ?>
+<ExternPluginMaker>
+    <LastBuildFile></LastBuildFile>
+    <LinuxFilename></LinuxFilename>
+    <WindowsFilename></WindowsFilename>
+    <MacFilename></MacFilename>
+    <RPI64Filename></RPI64Filename>
+    <RPI32Filename></RPI32Filename>
+    <PluginName>Text Line Filter</PluginName>
+    <InstallFilename>TextLineHighlighter</InstallFilename>
+    <Description>Highlights lines using regex's or a simple string matching.</Description>
+    <Contributors>Paul Hutchinson</Contributors>
+    <Copyright>2025</Copyright>
+    <ReleaseDate>1 Aug 2025</ReleaseDate>
+    <Version>1.0</Version>
+    <APIVersion>2.0</APIVersion>
+    <PluginClass>1</PluginClass>
+    <PluginSubClass>4</PluginSubClass>
+</ExternPluginMaker>
