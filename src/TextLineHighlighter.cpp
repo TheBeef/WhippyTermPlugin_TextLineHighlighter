@@ -226,7 +226,6 @@ static t_DataProcessorHandleType *TextLineHighlighter_AllocateData(void)
         Data->NumOfCollectedBytes=0;
         Data->NumOfCollectedChars=0;
         Data->StartOfLineMarker=NULL;
-        Data->TestMark1=NULL;
     }
     catch(...)
     {
@@ -249,8 +248,6 @@ static void TextLineHighlighter_FreeData(t_DataProcessorHandleType *DataHandle)
 
     if(Data->StartOfLineMarker!=NULL)
         m_TLF_DPS->FreeMark(Data->StartOfLineMarker);
-    if(Data->TestMark1!=NULL)
-        m_TLF_DPS->FreeMark(Data->TestMark1);
 
     free(Data->CollectedBytes);
 
