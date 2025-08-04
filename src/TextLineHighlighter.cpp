@@ -36,76 +36,92 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string>
+#include <regex>
 
 using namespace std;
 
 /*** DEFINES                  ***/
 #define REGISTER_PLUGIN_FUNCTION_PRIV_NAME      TextLineHighlighter // The name to append on the RegisterPlugin() function for built in version
 #define NEEDED_MIN_API_VERSION                  0x02000000
-//#define COLLECTED_BUFF_GROW_SIZE                1024
-#define COLLECTED_BUFF_GROW_SIZE                5
+
+#define NUM_OF_REGEXS               5
+#define NUM_OF_SIMPLE               3
+#define NUM_OF_STYLES               (NUM_OF_REGEXS+NUM_OF_SIMPLE)
 
 /*** MACROS                   ***/
 
 /*** TYPE DEFINITIONS         ***/
+struct TextLineHighlighter_TextStyle
+{
+    uint32_t FGColor;
+    uint32_t BGColor;
+    uint32_t Attribs;
+};
+
+struct TextLineHighlighterSimpleData
+{
+    string StartsWith;
+    string Contains;
+    string EndsWith;
+    int StyleIndex;
+};
+
+struct TextLineHighlighterRegexData
+{
+    string Pattern;
+    int StyleIndex;
+};
+
 struct TextLineHighlighterData
 {
     t_DataProMark *StartOfLineMarker;
 
-    uint8_t *CollectedBytes;    // DEBUG PAUL: No longer used?
-    int CollectedBytesBuffSize;    // DEBUG PAUL: No longer used?
-    int NumOfCollectedBytes;    // DEBUG PAUL: No longer used?
-    int NumOfCollectedChars;    // DEBUG PAUL: No longer used?
+    struct TextLineHighlighterSimpleData Simple[NUM_OF_SIMPLE];
+    struct TextLineHighlighterRegexData Regex[NUM_OF_REGEXS];
+    struct TextLineHighlighter_TextStyle Styles[NUM_OF_STYLES];
 
-    bool UseSimpleHighlighters;
-    string SimpleHighlighterStartsWith;
-    string SimpleHighlighterEndsWith;
-    string SimpleHighlighterContains;
+    bool GrabNewMark;
+};
 
-    bool RegexRemoveEnabled;
-    string RegexRemoveHighlighter1;
-    string RegexRemoveHighlighter2;
-    string RegexRemoveHighlighter3;
-    string RegexRemoveHighlighter4;
-    string RegexRemoveHighlighter5;
+struct SettingsStylingWidgetsSet
+{
+    struct PI_ColorPick *FgColor;
+    struct PI_ColorPick *BgColor;
+    struct PI_Checkbox *AttribUnderLine;
+    struct PI_Checkbox *AttribOverLine;
+    struct PI_Checkbox *AttribLineThrough;
+    struct PI_Checkbox *AttribBold;
+    struct PI_Checkbox *AttribItalic;
+    struct PI_Checkbox *AttribOutLine;
+};
 
-    bool RegexIncludeEnabled;
-    string RegexIncludeHighlighter1;
-    string RegexIncludeHighlighter2;
-    string RegexIncludeHighlighter3;
-    string RegexIncludeHighlighter4;
-    string RegexIncludeHighlighter5;
+struct TextLineHighlighter_RegexWidgets
+{
+    struct PI_ComboBox *StyleList;
+    struct PI_GroupBox *GroupBox;
+    struct PI_TextInput *RegexWid;
+};
+
+struct TextLineHighlighter_SimpleWidgets
+{
+    struct PI_ComboBox *StyleList;
+    struct PI_GroupBox *GroupBox;
+    struct PI_TextInput *StartsWith;
+    struct PI_TextInput *Contains;
+    struct PI_TextInput *EndsWith;
 };
 
 struct TextLineHighlighter_SettingsWidgets
 {
-    t_WidgetSysHandle *HelpTabHandle;
     t_WidgetSysHandle *SimpleTabHandle;
     t_WidgetSysHandle *RegexTabHandle;
 
-    struct PI_TextBox *HelpText;
+    struct TextLineHighlighter_RegexWidgets Regex[NUM_OF_REGEXS];
 
-    struct PI_Checkbox *UseSimpleHighlightering;
-    struct PI_TextInput *SimpleHighlighterStartsWith;
-    struct PI_TextInput *SimpleHighlighterEndsWith;
-    struct PI_TextInput *SimpleHighlighterContains;
-    struct PI_TextBox *SimpleHelpText;
+    struct TextLineHighlighter_SimpleWidgets Simple[NUM_OF_SIMPLE];
 
-    struct PI_Checkbox *UseRegexHighlightering;
-    struct PI_GroupBox *RegexRemoveGroup;
-    struct PI_Checkbox *RegexRemoveEnabled;
-    struct PI_TextInput *RegexRemoveHighlighter1;
-    struct PI_TextInput *RegexRemoveHighlighter2;
-    struct PI_TextInput *RegexRemoveHighlighter3;
-    struct PI_TextInput *RegexRemoveHighlighter4;
-    struct PI_TextInput *RegexRemoveHighlighter5;
-    struct PI_GroupBox *RegexIncludeGroup;
-    struct PI_Checkbox *RegexIncludeEnabled;
-    struct PI_TextInput *RegexIncludeHighlighter1;
-    struct PI_TextInput *RegexIncludeHighlighter2;
-    struct PI_TextInput *RegexIncludeHighlighter3;
-    struct PI_TextInput *RegexIncludeHighlighter4;
-    struct PI_TextInput *RegexIncludeHighlighter5;
+    t_WidgetSysHandle *StylesTabHandle[NUM_OF_STYLES];
+    struct SettingsStylingWidgetsSet Styles[NUM_OF_STYLES];
 };
 
 /*** FUNCTION PROTOTYPES      ***/
@@ -119,6 +135,28 @@ static void TextLineHighlighter_ApplySettings(t_DataProcessorHandleType *ConData
         t_PIKVList *Settings);
 static t_DataProcessorHandleType *TextLineHighlighter_AllocateData(void);
 static void TextLineHighlighter_FreeData(t_DataProcessorHandleType *DataHandle);
+static void TextLineHighlighter_AddSettingStyleWidgets(
+        struct SettingsStylingWidgetsSet *Widgets,
+        t_WidgetSysHandle *SysHandle);
+static void TextLineHighlighter_FreeSettingStyleWidgets(
+        struct SettingsStylingWidgetsSet *Widgets,
+        t_WidgetSysHandle *SysHandle);
+static void TextLineHighlighter_SetSettingStyleWidgets(t_PIKVList *Settings,
+        struct SettingsStylingWidgetsSet *Widgets,t_WidgetSysHandle *SysHandle,
+        const char *Prefix,uint32_t DefaultStyleSet);
+static uint32_t TextLineHighlighter_GrabSettingKV(t_PIKVList *Settings,
+        const char *Prefix,const char *Key,uint32_t DefaultValue,int Base);
+static void TextLineHighlighter_UpdateSettingFromStyleWidgets(t_PIKVList *Settings,
+        struct SettingsStylingWidgetsSet *Widgets,t_WidgetSysHandle *SysHandle,
+        const char *Prefix);
+static void TextLineHighlighter_SetSettingKV(t_PIKVList *Settings,
+        const char *Prefix,const char *Key,uint32_t Value,int Base);
+static void TextLineHighlighter_ApplySetting_SetData(t_PIKVList *Settings,
+        struct TextLineHighlighter_TextStyle *Style,const char *Prefix,
+        uint32_t DefaultStyleSet);
+static void TextLineHighlighter_HandleLine(struct TextLineHighlighterData *Data);
+static void TextLineHighlighter_ApplyStyleSet2Marker(struct TextLineHighlighterData *Data,
+        int StyleIndex);
 
 /*** VARIABLE DEFINITIONS     ***/
 struct DataProcessorAPI m_TextLineHighlighterCBs=
@@ -144,13 +182,27 @@ struct DataProcessorInfo m_TextLineHighlighter_Info=
     "Highlights lines using regex's or a simple string matching.",
     "Highlights lines using regex's or a simple string matching.",
     e_DataProcessorType_Text,
-    .TxtClass=e_TextDataProcessorClass_Other,
+    .TxtClass=e_TextDataProcessorClass_Highlighter,
     e_BinaryDataProcessorMode_Hex
 };
 
 static const struct PI_SystemAPI *m_TLF_SysAPI;
 static const struct DPS_API *m_TLF_DPS;
 static const struct PI_UIAPI *m_TLF_UIAPI;
+
+static const struct TextLineHighlighter_TextStyle m_DefaultStyleSets[NUM_OF_STYLES]=
+{
+    {0xFFFFFF,0xFF0000,0},                      // 0
+    {0x000000,0x00FF00,0},                      // 1
+    {0xFFFFFF,0x0000FF,0},                      // 2
+    {0xFFFFFF,0xFF00FF,0},                      // 3
+    {0x000000,0x00FFFF,0},                      // 4
+    {0xFFFFFF,0x000000,TXT_ATTRIB_UNDERLINE},   // 5
+    {0xFFFFFF,0x000000,TXT_ATTRIB_BOLD},        // 6
+    {0xFFFFFF,0x000000,TXT_ATTRIB_ITALIC},      // 7
+//    {0xFF0000,0x000000,0},                      // 8
+//    {0x00FF00,0x000000,0},                      // 9
+};
 
 /*******************************************************************************
  * NAME:
@@ -209,31 +261,42 @@ extern "C"
     }
 }
 
+/*******************************************************************************
+ * NAME:
+ *    AllocateData
+ *
+ * SYNOPSIS:
+ *    t_DataProcessorHandleType *AllocateData(void);
+ *
+ * PARAMETERS:
+ *    NONE
+ *
+ * FUNCTION:
+ *    This function allocates any needed data for this data processor.
+ *
+ * NOTES:
+ *    You can not use most of the API 'DPS_API' because there is no connection
+ *    when AllocateData() is called.
+ *
+ * RETURNS:
+ *   A pointer to the data, NULL if there was an error.
+ ******************************************************************************/
 static t_DataProcessorHandleType *TextLineHighlighter_AllocateData(void)
 {
     struct TextLineHighlighterData *Data;
 
+    Data=NULL;
     try
     {
         Data=new struct TextLineHighlighterData;
-        if(Data==NULL)
-            return NULL;
 
-        Data->CollectedBytes=(uint8_t *)malloc(COLLECTED_BUFF_GROW_SIZE);
-        if(Data->CollectedBytes==NULL)
-            throw(0);
-        Data->CollectedBytesBuffSize=COLLECTED_BUFF_GROW_SIZE;
-        Data->NumOfCollectedBytes=0;
-        Data->NumOfCollectedChars=0;
         Data->StartOfLineMarker=NULL;
+        Data->GrabNewMark=false;
     }
     catch(...)
     {
         if(Data!=NULL)
         {
-            if(Data->CollectedBytes!=NULL)
-                free(Data->CollectedBytes);
-
             delete Data;
         }
         return NULL;
@@ -242,14 +305,29 @@ static t_DataProcessorHandleType *TextLineHighlighter_AllocateData(void)
     return (t_DataProcessorHandleType *)Data;
 }
 
+/*******************************************************************************
+ * NAME:
+ *    FreeData
+ *
+ * SYNOPSIS:
+ *    void FreeData(t_DataProcessorHandleType *DataHandle);
+ *
+ * PARAMETERS:
+ *    DataHandle [I] -- The data handle to free.  This will need to be
+ *                      case to your internal data type before you use it.
+ *
+ * FUNCTION:
+ *    This function frees the memory allocated with AllocateData().
+ *
+ * RETURNS:
+ *    NONE
+ ******************************************************************************/
 static void TextLineHighlighter_FreeData(t_DataProcessorHandleType *DataHandle)
 {
     struct TextLineHighlighterData *Data=(struct TextLineHighlighterData *)DataHandle;
 
     if(Data->StartOfLineMarker!=NULL)
         m_TLF_DPS->FreeMark(Data->StartOfLineMarker);
-
-    free(Data->CollectedBytes);
 
     delete Data;
 }
@@ -357,327 +435,233 @@ void TextLineHighlighter_ProcessIncomingTextByte(t_DataProcessorHandleType *Data
         Data->StartOfLineMarker=m_TLF_DPS->AllocateMark();
         if(Data->StartOfLineMarker==NULL)
             return;
+        Data->GrabNewMark=true;
+    }
+
+    if(Data->GrabNewMark)
+    {
+        m_TLF_DPS->SetMark2CursorPos(Data->StartOfLineMarker);
+        Data->GrabNewMark=false;
+    }
+
+    if(RawByte=='\n')
+    {
+        /* We are at the end of the line, see if it matches anything */
+        TextLineHighlighter_HandleLine(Data);
     }
 }
 
-static void TextLineHighlighter_SimpleHighlighteringEventCB(const struct PICheckboxEvent *Event,void *UserData)
-{
-    struct TextLineHighlighter_SettingsWidgets *WData=(struct TextLineHighlighter_SettingsWidgets *)UserData;
-
-    m_TLF_UIAPI->SetCheckboxChecked(WData->SimpleTabHandle,
-            WData->UseSimpleHighlightering->Ctrl,true);
-    m_TLF_UIAPI->SetCheckboxChecked(WData->RegexTabHandle,
-            WData->UseRegexHighlightering->Ctrl,false);
-}
-
-static void TextLineHighlighter_RegexHighlighteringEventCB(const struct PICheckboxEvent *Event,void *UserData)
-{
-    struct TextLineHighlighter_SettingsWidgets *WData=(struct TextLineHighlighter_SettingsWidgets *)UserData;
-
-    m_TLF_UIAPI->SetCheckboxChecked(WData->SimpleTabHandle,
-            WData->UseSimpleHighlightering->Ctrl,false);
-    m_TLF_UIAPI->SetCheckboxChecked(WData->RegexTabHandle,
-            WData->UseRegexHighlightering->Ctrl,true);
-}
-
+/*******************************************************************************
+ * NAME:
+ *    AllocSettingsWidgets
+ *
+ * SYNOPSIS:
+ *    t_DataProSettingsWidgetsType *AllocSettingsWidgets(
+ *              t_WidgetSysHandle *WidgetHandle,t_PIKVList *Settings);
+ *
+ * PARAMETERS:
+ *    WidgetHandle [I] -- The handle to add new widgets to
+ *    Settings [I] -- The current settings.  This is a standard key/value
+ *                    list.
+ *
+ * FUNCTION:
+ *    This function is called when the user presses the "Settings" button
+ *    to change any settings for this plugin (in the settings dialog).  If
+ *    this is NULL then the user can not press the settings button.
+ *
+ *    When the plugin settings dialog is open it will have a tab control in
+ *    it with a "Generic" tab opened.  Your widgets will be added to this
+ *    tab.  If you want to add a new tab use can call the DPS_API
+ *    function AddNewSettingsTab().  If you want to change the name of the
+ *    first tab call SetCurrentSettingsTabName() before you add a new tab.
+ *
+ * RETURNS:
+ *    The private settings data that you want to use.  This is a private
+ *    structure that you allocate and then cast to
+ *    (t_DataProSettingsWidgetsType *) when you return.  It's up to you what
+ *    you want to do with this data (if you do not want to use it return
+ *    a fixed int set to 1, and ignore it in FreeSettingsWidgets.  If you
+ *    return NULL it is considered an error.
+ *
+ * SEE ALSO:
+ *    FreeSettingsWidgets(), SetCurrentSettingsTabName(), AddNewSettingsTab()
+ ******************************************************************************/
 t_DataProSettingsWidgetsType *TextLineHighlighter_AllocSettingsWidgets(t_WidgetSysHandle *WidgetHandle,t_PIKVList *Settings)
 {
     struct TextLineHighlighter_SettingsWidgets *WData;
-    const char *UseSimpleHighlighteringStr;
-    bool UseSimpleHighlightering;
-    const char *SimpleHighlighter_StartingWith;
-    const char *SimpleHighlighter_EndingWith;
-    const char *SimpleHighlighter_Contains;
-    const char *RegexHighlighter_RemoveEnabledStr;
-    bool RegexHighlighter_RemoveEnabled;
-    const char *RegexHighlighter_RemoveHighlighter1;
-    const char *RegexHighlighter_RemoveHighlighter2;
-    const char *RegexHighlighter_RemoveHighlighter3;
-    const char *RegexHighlighter_RemoveHighlighter4;
-    const char *RegexHighlighter_RemoveHighlighter5;
-    const char *RegexHighlighter_IncludeEnabledStr;
-    bool RegexHighlighter_IncludeEnabled;
-    const char *RegexHighlighter_IncludeHighlighter1;
-    const char *RegexHighlighter_IncludeHighlighter2;
-    const char *RegexHighlighter_IncludeHighlighter3;
-    const char *RegexHighlighter_IncludeHighlighter4;
-    const char *RegexHighlighter_IncludeHighlighter5;
+    const char *RegexStr;
+    const char *Str;
+    int r;
+    int c;
+    char buff[100];
 
     try
     {
         WData=new TextLineHighlighter_SettingsWidgets;
-        WData->HelpTabHandle=NULL;
+
+        /* Zero everything */
         WData->SimpleTabHandle=NULL;
         WData->RegexTabHandle=NULL;
-        WData->HelpText=NULL;
-        WData->UseSimpleHighlightering=NULL;
-        WData->SimpleHighlighterStartsWith=NULL;
-        WData->SimpleHighlighterEndsWith=NULL;
-        WData->SimpleHighlighterContains=NULL;
-        WData->SimpleHelpText=NULL;
-        WData->UseRegexHighlightering=NULL;
-        WData->RegexRemoveGroup=NULL;
-        WData->RegexRemoveEnabled=NULL;
-        WData->RegexRemoveHighlighter1=NULL;
-        WData->RegexRemoveHighlighter2=NULL;
-        WData->RegexRemoveHighlighter3=NULL;
-        WData->RegexRemoveHighlighter4=NULL;
-        WData->RegexRemoveHighlighter5=NULL;
-        WData->RegexIncludeGroup=NULL;
-        WData->RegexIncludeEnabled=NULL;
-        WData->RegexIncludeHighlighter1=NULL;
-        WData->RegexIncludeHighlighter2=NULL;
-        WData->RegexIncludeHighlighter3=NULL;
-        WData->RegexIncludeHighlighter4=NULL;
-        WData->RegexIncludeHighlighter5=NULL;
+        for(r=0;r<NUM_OF_REGEXS;r++)
+        {
+            WData->Regex[r].StyleList=NULL;
+            WData->Regex[r].RegexWid=NULL;
+            WData->Regex[r].GroupBox=NULL;
+        }
+        for(r=0;r<NUM_OF_SIMPLE;r++)
+        {
+            WData->Simple[r].StyleList=NULL;
+            WData->Simple[r].GroupBox=NULL;
+            WData->Simple[r].StartsWith=NULL;
+            WData->Simple[r].Contains=NULL;
+            WData->Simple[r].EndsWith=NULL;
+        }
+        for(r=0;r<NUM_OF_STYLES;r++)
+            WData->StylesTabHandle[r]=NULL;
 
-        m_TLF_DPS->SetCurrentSettingsTabName("Help");
-        WData->HelpTabHandle=WidgetHandle;
+        /* Add widgets */
 
-        WData->HelpText=m_TLF_UIAPI->AddTextBox(WData->HelpTabHandle,NULL,
-                "This plugin highlights lines out in the incoming stream.\n"
-                "\n"
-                "You can use a simple filter or more complex rxgex's\n"
-                "\n"
-                "You can only use simple or rxgex filtering not both at "
-                "the same time.  When you enable simple it will disable "
-                "rxgex and enabling rxgex will disable simple.");
-        if(WData->HelpText==NULL)
-            throw(0);
-
-        WData->SimpleTabHandle=m_TLF_DPS->AddNewSettingsTab("Simple");
-        if(WData->SimpleTabHandle==NULL)
-            throw(0);
-        WData->UseSimpleHighlightering=m_TLF_UIAPI->AddCheckbox(WData->
-                SimpleTabHandle,"Use simple filtering",
-                TextLineHighlighter_SimpleHighlighteringEventCB,(void *)WData);
-        if(WData->UseSimpleHighlightering==NULL)
-            throw(0);
-
-        WData->SimpleHighlighterStartsWith=m_TLF_UIAPI->
-                AddTextInput(WData->SimpleTabHandle,
-                "Highlighter Lines that start with",NULL,NULL);
-        if(WData->SimpleHighlighterStartsWith==NULL)
-            throw(0);
-
-        WData->SimpleHighlighterEndsWith=m_TLF_UIAPI->
-                AddTextInput(WData->SimpleTabHandle,
-                "Highlighter Lines that end with",NULL,NULL);
-        if(WData->SimpleHighlighterEndsWith==NULL)
-            throw(0);
-
-        WData->SimpleHighlighterContains=m_TLF_UIAPI->
-                AddTextInput(WData->SimpleTabHandle,
-                "Highlighter Lines that contain",NULL,NULL);
-        if(WData->SimpleHighlighterContains==NULL)
-            throw(0);
-
-        WData->SimpleHelpText=m_TLF_UIAPI->AddTextBox(WData->SimpleTabHandle,
-                NULL,
-                "All inputs are a list of words that will be matched, "
-                "seperated by spaces.\n"
-                "\n"
-                "If you want to include spaces in your matched word put "
-                "the string in quote's.\n"
-                "\n"
-                "If you want to include a quote in your matched word "
-                "prefix it with a backslash (\\)\n"
-                "\n"
-                "If you want to include a backslash in your matched "
-                "word use two backslashes (\\\\)");
-        if(WData->SimpleHelpText==NULL)
-            throw(0);
+        m_TLF_DPS->SetCurrentSettingsTabName("Simple");
+        WData->SimpleTabHandle=WidgetHandle;
 
         WData->RegexTabHandle=m_TLF_DPS->AddNewSettingsTab("Regex");
         if(WData->RegexTabHandle==NULL)
             throw(0);
-        WData->UseRegexHighlightering=m_TLF_UIAPI->
-                AddCheckbox(WData->RegexTabHandle,
-                "Use regex filtering",
-                TextLineHighlighter_RegexHighlighteringEventCB,(void *)WData);
-        if(WData->UseRegexHighlightering==NULL)
-            throw(0);
 
-        WData->RegexRemoveGroup=m_TLF_UIAPI->AddGroupBox(WData->RegexTabHandle,
-                "Remove lines matching");
-        if(WData->RegexRemoveGroup==NULL)
-            throw(0);
-        WData->RegexRemoveEnabled=m_TLF_UIAPI->AddCheckbox(WData->
-                RegexRemoveGroup->GroupWidgetHandle,
-                "Enabled",NULL,NULL);
-        if(WData->RegexRemoveEnabled==NULL)
-            throw(0);
-        WData->RegexRemoveHighlighter1=m_TLF_UIAPI->AddTextInput(WData->
-                RegexRemoveGroup->GroupWidgetHandle,
-                "Highlighter 1",NULL,NULL);
-        if(WData->RegexRemoveHighlighter1==NULL)
-            throw(0);
-        WData->RegexRemoveHighlighter2=m_TLF_UIAPI->AddTextInput(WData->
-                RegexRemoveGroup->GroupWidgetHandle,
-                "Highlighter 2",NULL,NULL);
-        if(WData->RegexRemoveHighlighter2==NULL)
-            throw(0);
-        WData->RegexRemoveHighlighter3=m_TLF_UIAPI->AddTextInput(WData->
-                RegexRemoveGroup->GroupWidgetHandle,
-                "Highlighter 3",NULL,NULL);
-        if(WData->RegexRemoveHighlighter3==NULL)
-            throw(0);
-        WData->RegexRemoveHighlighter4=m_TLF_UIAPI->AddTextInput(WData->
-                RegexRemoveGroup->GroupWidgetHandle,
-                "Highlighter 4",NULL,NULL);
-        if(WData->RegexRemoveHighlighter4==NULL)
-            throw(0);
-        WData->RegexRemoveHighlighter5=m_TLF_UIAPI->AddTextInput(WData->
-                RegexRemoveGroup->GroupWidgetHandle,
-                "Highlighter 5",NULL,NULL);
-        if(WData->RegexRemoveHighlighter5==NULL)
-            throw(0);
+        for(r=0;r<NUM_OF_REGEXS;r++)
+        {
+            sprintf(buff,"Regex Match %d",r+1);
+            WData->Regex[r].GroupBox=m_TLF_UIAPI->AddGroupBox(WData->
+                RegexTabHandle,buff);
+            if(WData->Regex[r].GroupBox==NULL)
+                throw(0);
 
-        WData->RegexIncludeGroup=m_TLF_UIAPI->AddGroupBox(WData->RegexTabHandle,
-                "Only include lines matching");
-        if(WData->RegexIncludeGroup==NULL)
-            throw(0);
-        WData->RegexIncludeEnabled=m_TLF_UIAPI->AddCheckbox(WData->
-                RegexIncludeGroup->GroupWidgetHandle,
-                "Enabled",NULL,NULL);
-        if(WData->RegexIncludeEnabled==NULL)
-            throw(0);
-        WData->RegexIncludeHighlighter1=m_TLF_UIAPI->AddTextInput(WData->
-                RegexIncludeGroup->GroupWidgetHandle,
-                "Highlighter 1",NULL,NULL);
-        if(WData->RegexIncludeHighlighter1==NULL)
-            throw(0);
-        WData->RegexIncludeHighlighter2=m_TLF_UIAPI->AddTextInput(WData->
-                RegexIncludeGroup->GroupWidgetHandle,
-                "Highlighter 2",NULL,NULL);
-        if(WData->RegexIncludeHighlighter2==NULL)
-            throw(0);
-        WData->RegexIncludeHighlighter3=m_TLF_UIAPI->AddTextInput(WData->
-                RegexIncludeGroup->GroupWidgetHandle,
-                "Highlighter 3",NULL,NULL);
-        if(WData->RegexIncludeHighlighter3==NULL)
-            throw(0);
-        WData->RegexIncludeHighlighter4=m_TLF_UIAPI->AddTextInput(WData->
-                RegexIncludeGroup->GroupWidgetHandle,
-                "Highlighter 4",NULL,NULL);
-        if(WData->RegexIncludeHighlighter4==NULL)
-            throw(0);
-        WData->RegexIncludeHighlighter5=m_TLF_UIAPI->AddTextInput(WData->
-                RegexIncludeGroup->GroupWidgetHandle,
-                "Highlighter 5",NULL,NULL);
-        if(WData->RegexIncludeHighlighter5==NULL)
-            throw(0);
+            WData->Regex[r].RegexWid=m_TLF_UIAPI->AddTextInput(WData->
+                    Regex[r].GroupBox->GroupWidgetHandle,"Regex",NULL,NULL);
+            if(WData->Regex[r].RegexWid==NULL)
+                throw(0);
 
-        /* Set UI to settings values */
-        UseSimpleHighlighteringStr=m_TLF_SysAPI->KVGetItem(Settings,"UseSimpleHighlightering");
-        SimpleHighlighter_StartingWith=m_TLF_SysAPI->KVGetItem(Settings,"SimpleHighlighter_StartingWith");
-        SimpleHighlighter_EndingWith=m_TLF_SysAPI->KVGetItem(Settings,"SimpleHighlighter_EndingWith");
-        SimpleHighlighter_Contains=m_TLF_SysAPI->KVGetItem(Settings,"SimpleHighlighter_Contains");
-        RegexHighlighter_RemoveEnabledStr=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveEnabled");
-        RegexHighlighter_RemoveHighlighter1=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter1");
-        RegexHighlighter_RemoveHighlighter2=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter2");
-        RegexHighlighter_RemoveHighlighter3=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter3");
-        RegexHighlighter_RemoveHighlighter4=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter4");
-        RegexHighlighter_RemoveHighlighter5=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter5");
-        RegexHighlighter_IncludeEnabledStr=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeEnabled");
-        RegexHighlighter_IncludeHighlighter1=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter1");
-        RegexHighlighter_IncludeHighlighter2=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter2");
-        RegexHighlighter_IncludeHighlighter3=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter3");
-        RegexHighlighter_IncludeHighlighter4=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter4");
-        RegexHighlighter_IncludeHighlighter5=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter5");
+            WData->Regex[r].StyleList=m_TLF_UIAPI->AddComboBox(WData->
+                    Regex[r].GroupBox->GroupWidgetHandle,false,"Style",
+                    NULL,NULL);
+            if(WData->Regex[r].StyleList==NULL)
+                throw(0);
+            for(c=0;c<NUM_OF_STYLES;c++)
+            {
+                sprintf(buff,"Color Set %d",c+1);
+                m_TLF_UIAPI->AddItem2ComboBox(WData->Regex[r].GroupBox->
+                        GroupWidgetHandle,WData->Regex[r].StyleList->Ctrl,
+                        buff,c);
+            }
+        }
 
-        /* Set defaults */
-        if(UseSimpleHighlighteringStr==NULL)
-            UseSimpleHighlighteringStr="1";
-        if(SimpleHighlighter_StartingWith==NULL)
-            SimpleHighlighter_StartingWith="";
-        if(SimpleHighlighter_EndingWith==NULL)
-            SimpleHighlighter_EndingWith="";
-        if(SimpleHighlighter_Contains==NULL)
-            SimpleHighlighter_Contains="";
-        if(RegexHighlighter_RemoveEnabledStr==NULL)
-            RegexHighlighter_RemoveEnabledStr="0";
-        if(RegexHighlighter_RemoveHighlighter1==NULL)
-            RegexHighlighter_RemoveHighlighter1="";
-        if(RegexHighlighter_RemoveHighlighter2==NULL)
-            RegexHighlighter_RemoveHighlighter2="";
-        if(RegexHighlighter_RemoveHighlighter3==NULL)
-            RegexHighlighter_RemoveHighlighter3="";
-        if(RegexHighlighter_RemoveHighlighter4==NULL)
-            RegexHighlighter_RemoveHighlighter4="";
-        if(RegexHighlighter_RemoveHighlighter5==NULL)
-            RegexHighlighter_RemoveHighlighter5="";
-        if(RegexHighlighter_IncludeEnabledStr==NULL)
-            RegexHighlighter_IncludeEnabledStr="0";
-        if(RegexHighlighter_IncludeHighlighter1==NULL)
-            RegexHighlighter_IncludeHighlighter1="";
-        if(RegexHighlighter_IncludeHighlighter2==NULL)
-            RegexHighlighter_IncludeHighlighter2="";
-        if(RegexHighlighter_IncludeHighlighter3==NULL)
-            RegexHighlighter_IncludeHighlighter3="";
-        if(RegexHighlighter_IncludeHighlighter4==NULL)
-            RegexHighlighter_IncludeHighlighter4="";
-        if(RegexHighlighter_IncludeHighlighter5==NULL)
-            RegexHighlighter_IncludeHighlighter5="";
+        for(r=0;r<NUM_OF_SIMPLE;r++)
+        {
+            sprintf(buff,"Simple Match %d",r+1);
+            WData->Simple[r].GroupBox=m_TLF_UIAPI->AddGroupBox(WData->
+                SimpleTabHandle,buff);
+            if(WData->Simple[r].GroupBox==NULL)
+                throw(0);
 
-        UseSimpleHighlightering=atoi(UseSimpleHighlighteringStr);
-        RegexHighlighter_RemoveEnabled=atoi(RegexHighlighter_RemoveEnabledStr);
-        RegexHighlighter_IncludeEnabled=atoi(RegexHighlighter_IncludeEnabledStr);
+            WData->Simple[r].StartsWith=m_TLF_UIAPI->AddTextInput(WData->
+                    Simple[r].GroupBox->GroupWidgetHandle,
+                    "Lines that start with",NULL,NULL);
+            if(WData->Simple[r].StartsWith==NULL)
+                throw(0);
 
-        /* Set the widgets */
-        m_TLF_UIAPI->SetCheckboxChecked(WData->SimpleTabHandle,
-                WData->UseSimpleHighlightering->Ctrl,UseSimpleHighlightering);
-        m_TLF_UIAPI->SetCheckboxChecked(WData->RegexTabHandle,
-                WData->UseRegexHighlightering->Ctrl,!UseSimpleHighlightering);
+            WData->Simple[r].Contains=m_TLF_UIAPI->
+                    AddTextInput(WData->Simple[r].GroupBox->GroupWidgetHandle,
+                    "Lines that contain",NULL,NULL);
+            if(WData->Simple[r].Contains==NULL)
+                throw(0);
 
-        /** Simple **/
-        m_TLF_UIAPI->SetTextInputText(WData->SimpleTabHandle,
-                WData->SimpleHighlighterStartsWith->Ctrl,SimpleHighlighter_StartingWith);
-        m_TLF_UIAPI->SetTextInputText(WData->SimpleTabHandle,
-                WData->SimpleHighlighterEndsWith->Ctrl,SimpleHighlighter_EndingWith);
-        m_TLF_UIAPI->SetTextInputText(WData->SimpleTabHandle,
-                WData->SimpleHighlighterContains->Ctrl,SimpleHighlighter_Contains);
+            WData->Simple[r].EndsWith=m_TLF_UIAPI->
+                    AddTextInput(WData->Simple[r].GroupBox->GroupWidgetHandle,
+                    "Lines that end with",NULL,NULL);
+            if(WData->Simple[r].EndsWith==NULL)
+                throw(0);
+
+            WData->Simple[r].StyleList=m_TLF_UIAPI->AddComboBox(WData->
+                    Simple[r].GroupBox->GroupWidgetHandle,false,"Style",
+                    NULL,NULL);
+            if(WData->Simple[r].StyleList==NULL)
+                throw(0);
+            for(c=0;c<NUM_OF_STYLES;c++)
+            {
+                sprintf(buff,"Color Set %d",c+1);
+                m_TLF_UIAPI->AddItem2ComboBox(WData->Simple[r].GroupBox->
+                        GroupWidgetHandle,WData->Simple[r].StyleList->Ctrl,
+                        buff,c);
+            }
+        }
 
         /** Regex **/
-        /*** Remove ***/
-        m_TLF_UIAPI->SetCheckboxChecked(WData->RegexRemoveGroup->
-                GroupWidgetHandle,WData->RegexRemoveEnabled->Ctrl,
-                RegexHighlighter_RemoveEnabled);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexRemoveGroup->
-                GroupWidgetHandle,WData->RegexRemoveHighlighter1->Ctrl,
-                RegexHighlighter_RemoveHighlighter1);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexRemoveGroup->
-                GroupWidgetHandle,WData->RegexRemoveHighlighter2->Ctrl,
-                RegexHighlighter_RemoveHighlighter2);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexRemoveGroup->
-                GroupWidgetHandle,WData->RegexRemoveHighlighter3->Ctrl,
-                RegexHighlighter_RemoveHighlighter3);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexRemoveGroup->
-                GroupWidgetHandle,WData->RegexRemoveHighlighter4->Ctrl,
-                RegexHighlighter_RemoveHighlighter4);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexRemoveGroup->
-                GroupWidgetHandle,WData->RegexRemoveHighlighter5->Ctrl,
-                RegexHighlighter_RemoveHighlighter5);
+        for(r=0;r<NUM_OF_REGEXS;r++)
+        {
+            sprintf(buff,"RegexStr%d",r);
+            RegexStr=m_TLF_SysAPI->KVGetItem(Settings,buff);
+            if(RegexStr==NULL)
+                RegexStr="";
+            m_TLF_UIAPI->SetTextInputText(WData->Regex[r].GroupBox->
+                    GroupWidgetHandle,WData->Regex[r].RegexWid->Ctrl,RegexStr);
 
-        /*** Include ***/
-        m_TLF_UIAPI->SetCheckboxChecked(WData->RegexIncludeGroup->
-                GroupWidgetHandle,WData->RegexIncludeEnabled->Ctrl,
-                RegexHighlighter_IncludeEnabled);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexIncludeGroup->
-                GroupWidgetHandle,WData->RegexIncludeHighlighter1->Ctrl,
-                RegexHighlighter_IncludeHighlighter1);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexIncludeGroup->
-                GroupWidgetHandle,WData->RegexIncludeHighlighter2->Ctrl,
-                RegexHighlighter_IncludeHighlighter2);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexIncludeGroup->
-                GroupWidgetHandle,WData->RegexIncludeHighlighter3->Ctrl,
-                RegexHighlighter_IncludeHighlighter3);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexIncludeGroup->
-                GroupWidgetHandle,WData->RegexIncludeHighlighter4->Ctrl,
-                RegexHighlighter_IncludeHighlighter4);
-        m_TLF_UIAPI->SetTextInputText(WData->RegexIncludeGroup->
-                GroupWidgetHandle,WData->RegexIncludeHighlighter5->Ctrl,
-                RegexHighlighter_IncludeHighlighter5);
+            sprintf(buff,"RegexStyle%d",r);
+            Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+            if(Str==NULL)
+                Str="0";
+
+            m_TLF_UIAPI->SetComboBoxSelectedEntry(WData->Regex[r].GroupBox->
+                    GroupWidgetHandle,WData->Regex[r].StyleList->Ctrl,
+                    atoi(Str));
+        }
+
+        for(r=0;r<NUM_OF_SIMPLE;r++)
+        {
+            sprintf(buff,"SimpleStart%d",r);
+            Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+            if(Str==NULL)
+                Str="";
+            m_TLF_UIAPI->SetTextInputText(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].StartsWith->Ctrl,Str);
+
+            sprintf(buff,"SimpleContains%d",r);
+            Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+            if(Str==NULL)
+                Str="";
+            m_TLF_UIAPI->SetTextInputText(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].Contains->Ctrl,Str);
+
+            sprintf(buff,"SimpleEnd%d",r);
+            Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+            if(Str==NULL)
+                Str="";
+            m_TLF_UIAPI->SetTextInputText(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].EndsWith->Ctrl,Str);
+
+            sprintf(buff,"SimpleStyle%d",r);
+            Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+            if(Str==NULL)
+                Str="0";
+
+            m_TLF_UIAPI->SetComboBoxSelectedEntry(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].StyleList->Ctrl,
+                    atoi(Str));
+        }
+
+        /* Styling tabs (colors) */
+        for(r=0;r<NUM_OF_STYLES;r++)
+        {
+            sprintf(buff,"Colors %d",r+1);
+            WData->StylesTabHandle[r]=m_TLF_DPS->AddNewSettingsTab(buff);
+            if(WData->StylesTabHandle[r]==NULL)
+                throw(0);
+            TextLineHighlighter_AddSettingStyleWidgets(&WData->Styles[r],
+                    WData->StylesTabHandle[r]);
+
+            sprintf(buff,"Colors%d",r);
+            TextLineHighlighter_SetSettingStyleWidgets(Settings,&WData->Styles[r],
+                    WData->StylesTabHandle[r],buff,r);
+        }
     }
     catch(...)
     {
@@ -692,224 +676,805 @@ t_DataProSettingsWidgetsType *TextLineHighlighter_AllocSettingsWidgets(t_WidgetS
     return (t_DataProSettingsWidgetsType *)WData;
 }
 
+/*******************************************************************************
+ * NAME:
+ *    FreeSettingsWidgets
+ *
+ * SYNOPSIS:
+ *    void FreeSettingsWidgets(t_DataProSettingsWidgetsType *PrivData);
+ *
+ * PARAMETERS:
+ *    PrivData [I] -- The private data to free
+ *
+ * FUNCTION:
+ *      This function is called when the system frees the settings widets.
+ *      It should free any private data you allocated in AllocSettingsWidgets().
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    AllocSettingsWidgets()
+ ******************************************************************************/
 void TextLineHighlighter_FreeSettingsWidgets(t_DataProSettingsWidgetsType *PrivData)
 {
     struct TextLineHighlighter_SettingsWidgets *WData=(struct TextLineHighlighter_SettingsWidgets *)PrivData;
+    int r;
 
-    if(WData->RegexIncludeHighlighter5!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter5);
-    if(WData->RegexIncludeHighlighter4!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter4);
-    if(WData->RegexIncludeHighlighter3!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter3);
-    if(WData->RegexIncludeHighlighter2!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter2);
-    if(WData->RegexIncludeHighlighter1!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter1);
-    if(WData->RegexIncludeEnabled!=NULL)
-        m_TLF_UIAPI->FreeCheckbox(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeEnabled);
-    if(WData->RegexIncludeGroup!=NULL)
-        m_TLF_UIAPI->FreeGroupBox(WData->RegexTabHandle,WData->RegexIncludeGroup);
-    if(WData->RegexRemoveHighlighter5!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter5);
-    if(WData->RegexRemoveHighlighter4!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter4);
-    if(WData->RegexRemoveHighlighter3!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter3);
-    if(WData->RegexRemoveHighlighter2!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter2);
-    if(WData->RegexRemoveHighlighter1!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter1);
-    if(WData->RegexRemoveEnabled!=NULL)
-        m_TLF_UIAPI->FreeCheckbox(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveEnabled);
-    if(WData->RegexRemoveGroup!=NULL)
-        m_TLF_UIAPI->FreeGroupBox(WData->RegexTabHandle,WData->RegexRemoveGroup);
-    if(WData->UseRegexHighlightering!=NULL)
-        m_TLF_UIAPI->FreeCheckbox(WData->RegexTabHandle,WData->UseRegexHighlightering);
+    /* Free everything in reverse order */
 
-    if(WData->SimpleHelpText!=NULL)
-        m_TLF_UIAPI->FreeTextBox(WData->SimpleTabHandle,WData->SimpleHelpText);
-    if(WData->SimpleHighlighterContains!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->SimpleTabHandle,WData->SimpleHighlighterContains);
-    if(WData->SimpleHighlighterEndsWith!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->SimpleTabHandle,WData->SimpleHighlighterEndsWith);
-    if(WData->SimpleHighlighterStartsWith!=NULL)
-        m_TLF_UIAPI->FreeTextInput(WData->SimpleTabHandle,WData->SimpleHighlighterStartsWith);
-    if(WData->UseSimpleHighlightering!=NULL)
-        m_TLF_UIAPI->FreeCheckbox(WData->SimpleTabHandle,WData->UseSimpleHighlightering);
+    /* Styling tabs (colors) */
+    for(r=NUM_OF_STYLES-1;r>=0;r--)
+    {
+        TextLineHighlighter_FreeSettingStyleWidgets(&WData->Styles[r],
+                WData->StylesTabHandle[r]);
+    }
 
-    if(WData->HelpText!=NULL)
-        m_TLF_UIAPI->FreeTextBox(WData->HelpTabHandle,WData->HelpText);
+    for(r=NUM_OF_SIMPLE-1;r>=0;r--)
+    {
+        if(WData->Simple[r].StyleList!=NULL)
+        {
+            m_TLF_UIAPI->FreeComboBox(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].StyleList);
+        }
+        if(WData->Simple[r].EndsWith!=NULL)
+        {
+            m_TLF_UIAPI->FreeTextInput(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].EndsWith);
+        }
+        if(WData->Simple[r].Contains!=NULL)
+        {
+            m_TLF_UIAPI->FreeTextInput(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].Contains);
+        }
+        if(WData->Simple[r].StartsWith!=NULL)
+        {
+            m_TLF_UIAPI->FreeTextInput(WData->Simple[r].GroupBox->
+                    GroupWidgetHandle,WData->Simple[r].StartsWith);
+        }
+        if(WData->Simple[r].GroupBox!=NULL)
+        {
+            m_TLF_UIAPI->FreeGroupBox(WData->SimpleTabHandle,
+                    WData->Simple[r].GroupBox);
+        }
+    }
+    for(r=NUM_OF_REGEXS-1;r>=0;r--)
+    {
+        if(WData->Regex[r].StyleList!=NULL)
+        {
+            m_TLF_UIAPI->FreeComboBox(WData->Regex[r].GroupBox->
+                    GroupWidgetHandle,WData->Regex[r].StyleList);
+        }
+        if(WData->Regex[r].RegexWid!=NULL)
+        {
+            m_TLF_UIAPI->FreeTextInput(WData->Regex[r].GroupBox->
+                    GroupWidgetHandle,WData->Regex[r].RegexWid);
+        }
+        if(WData->Regex[r].GroupBox!=NULL)
+        {
+            m_TLF_UIAPI->FreeGroupBox(WData->RegexTabHandle,
+                    WData->Regex[r].GroupBox);
+        }
+    }
 
     delete WData;
 }
 
+/*******************************************************************************
+ * NAME:
+ *    SetSettingsFromWidgets
+ *
+ * SYNOPSIS:
+ *    void SetSettingsFromWidgets(t_DataProSettingsWidgetsType *PrivData,
+ *              t_PIKVList *Settings);
+ *
+ * PARAMETERS:
+ *    PrivData [I] -- Your private data allocated in AllocSettingsWidgets()
+ *    Settings [O] -- This is where you store the settings.
+ *
+ * FUNCTION:
+ *    This function takes the widgets added with AllocSettingsWidgets() and
+ *    stores them is a key/value pair list in 'Settings'.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    AllocSettingsWidgets()
+ ******************************************************************************/
 void TextLineHighlighter_SetSettingsFromWidgets(t_DataProSettingsWidgetsType *PrivData,t_PIKVList *Settings)
 {
     struct TextLineHighlighter_SettingsWidgets *WData=(struct TextLineHighlighter_SettingsWidgets *)PrivData;
-    const char *UseSimpleHighlighteringStr;
-    string SimpleHighlighter_StartingWith;
-    string SimpleHighlighter_EndingWith;
-    string SimpleHighlighter_Contains;
-    const char *RegexHighlighter_RemoveEnabledStr;
-    string RegexHighlighter_RemoveHighlighter1;
-    string RegexHighlighter_RemoveHighlighter2;
-    string RegexHighlighter_RemoveHighlighter3;
-    string RegexHighlighter_RemoveHighlighter4;
-    string RegexHighlighter_RemoveHighlighter5;
-    const char *RegexHighlighter_IncludeEnabledStr;
-    string RegexHighlighter_IncludeHighlighter1;
-    string RegexHighlighter_IncludeHighlighter2;
-    string RegexHighlighter_IncludeHighlighter3;
-    string RegexHighlighter_IncludeHighlighter4;
-    string RegexHighlighter_IncludeHighlighter5;
-
-    if(m_TLF_UIAPI->IsCheckboxChecked(WData->SimpleTabHandle,WData->UseSimpleHighlightering->Ctrl))
-        UseSimpleHighlighteringStr="1";
-    else
-        UseSimpleHighlighteringStr="0";
+    string Str;
+    int r;
+    char buff[100];
+    char buff2[100];
+    uint32_t Num;
 
     /** Simple **/
-    SimpleHighlighter_StartingWith=m_TLF_UIAPI->GetTextInputText(WData->SimpleTabHandle,WData->SimpleHighlighterStartsWith->Ctrl);
-    SimpleHighlighter_EndingWith=m_TLF_UIAPI->GetTextInputText(WData->SimpleTabHandle,WData->SimpleHighlighterEndsWith->Ctrl);
-    SimpleHighlighter_Contains=m_TLF_UIAPI->GetTextInputText(WData->SimpleTabHandle,WData->SimpleHighlighterContains->Ctrl);
+    for(r=0;r<NUM_OF_SIMPLE;r++)
+    {
+        Str=m_TLF_UIAPI->GetTextInputText(WData->Simple[r].GroupBox->
+                GroupWidgetHandle,WData->Simple[r].StartsWith->Ctrl);
+        sprintf(buff,"SimpleStart%d",r);
+        m_TLF_SysAPI->KVAddItem(Settings,buff,Str.c_str());
+
+        Str=m_TLF_UIAPI->GetTextInputText(WData->Simple[r].GroupBox->
+                GroupWidgetHandle,WData->Simple[r].Contains->Ctrl);
+        sprintf(buff,"SimpleContains%d",r);
+        m_TLF_SysAPI->KVAddItem(Settings,buff,Str.c_str());
+
+        Str=m_TLF_UIAPI->GetTextInputText(WData->Simple[r].GroupBox->
+                GroupWidgetHandle,WData->Simple[r].EndsWith->Ctrl);
+        sprintf(buff,"SimpleEnd%d",r);
+        m_TLF_SysAPI->KVAddItem(Settings,buff,Str.c_str());
+
+        Num=m_TLF_UIAPI->GetComboBoxSelectedEntry(WData->Simple[r].GroupBox->
+                GroupWidgetHandle,WData->Simple[r].StyleList->Ctrl);
+        sprintf(buff,"SimpleStyle%d",r);
+        sprintf(buff2,"%d",Num);
+        m_TLF_SysAPI->KVAddItem(Settings,buff,buff2);
+    }
 
     /** Regex **/
-    /*** Remove ***/
-    if(m_TLF_UIAPI->IsCheckboxChecked(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveEnabled->Ctrl))
-        RegexHighlighter_RemoveEnabledStr="1";
-    else
-        RegexHighlighter_RemoveEnabledStr="0";
-    RegexHighlighter_RemoveHighlighter1=m_TLF_UIAPI->GetTextInputText(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter1->Ctrl);
-    RegexHighlighter_RemoveHighlighter2=m_TLF_UIAPI->GetTextInputText(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter2->Ctrl);
-    RegexHighlighter_RemoveHighlighter3=m_TLF_UIAPI->GetTextInputText(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter3->Ctrl);
-    RegexHighlighter_RemoveHighlighter4=m_TLF_UIAPI->GetTextInputText(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter4->Ctrl);
-    RegexHighlighter_RemoveHighlighter5=m_TLF_UIAPI->GetTextInputText(WData->RegexRemoveGroup->GroupWidgetHandle,WData->RegexRemoveHighlighter5->Ctrl);
+    for(r=0;r<NUM_OF_REGEXS;r++)
+    {
+        Str=m_TLF_UIAPI->GetTextInputText(WData->Regex[r].GroupBox->
+                GroupWidgetHandle,WData->Regex[r].RegexWid->Ctrl);
 
-    /*** Include ***/
-    if(m_TLF_UIAPI->IsCheckboxChecked(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeEnabled->Ctrl))
-        RegexHighlighter_IncludeEnabledStr="1";
-    else
-        RegexHighlighter_IncludeEnabledStr="0";
-    RegexHighlighter_IncludeHighlighter1=m_TLF_UIAPI->GetTextInputText(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter1->Ctrl);
-    RegexHighlighter_IncludeHighlighter2=m_TLF_UIAPI->GetTextInputText(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter2->Ctrl);
-    RegexHighlighter_IncludeHighlighter3=m_TLF_UIAPI->GetTextInputText(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter3->Ctrl);
-    RegexHighlighter_IncludeHighlighter4=m_TLF_UIAPI->GetTextInputText(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter4->Ctrl);
-    RegexHighlighter_IncludeHighlighter5=m_TLF_UIAPI->GetTextInputText(WData->RegexIncludeGroup->GroupWidgetHandle,WData->RegexIncludeHighlighter5->Ctrl);
+        sprintf(buff,"RegexStr%d",r);
+        m_TLF_SysAPI->KVAddItem(Settings,buff,Str.c_str());
 
-    m_TLF_SysAPI->KVAddItem(Settings,"UseSimpleHighlightering",UseSimpleHighlighteringStr);
-    m_TLF_SysAPI->KVAddItem(Settings,"SimpleHighlighter_StartingWith",SimpleHighlighter_StartingWith.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"SimpleHighlighter_EndingWith",SimpleHighlighter_EndingWith.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"SimpleHighlighter_Contains",SimpleHighlighter_Contains.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_RemoveEnabled",RegexHighlighter_RemoveEnabledStr);
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_RemoveHighlighter1",RegexHighlighter_RemoveHighlighter1.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_RemoveHighlighter2",RegexHighlighter_RemoveHighlighter2.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_RemoveHighlighter3",RegexHighlighter_RemoveHighlighter3.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_RemoveHighlighter4",RegexHighlighter_RemoveHighlighter4.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_RemoveHighlighter5",RegexHighlighter_RemoveHighlighter5.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_IncludeEnabled",RegexHighlighter_IncludeEnabledStr);
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_IncludeHighlighter1",RegexHighlighter_IncludeHighlighter1.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_IncludeHighlighter2",RegexHighlighter_IncludeHighlighter2.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_IncludeHighlighter3",RegexHighlighter_IncludeHighlighter3.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_IncludeHighlighter4",RegexHighlighter_IncludeHighlighter4.c_str());
-    m_TLF_SysAPI->KVAddItem(Settings,"RegexHighlighter_IncludeHighlighter5",RegexHighlighter_IncludeHighlighter5.c_str());
+        Num=m_TLF_UIAPI->GetComboBoxSelectedEntry(WData->Regex[r].GroupBox->
+                GroupWidgetHandle,WData->Regex[r].StyleList->Ctrl);
+        sprintf(buff,"RegexStyle%d",r);
+        sprintf(buff2,"%d",Num);
+        m_TLF_SysAPI->KVAddItem(Settings,buff,buff2);
+    }
+
+    /* Styling tabs (colors) */
+    for(r=0;r<NUM_OF_STYLES;r++)
+    {
+        sprintf(buff,"Colors%d",r);
+        TextLineHighlighter_UpdateSettingFromStyleWidgets(Settings,
+                &WData->Styles[r],WData->StylesTabHandle[r],buff);
+    }
 }
 
+/*******************************************************************************
+ * NAME:
+ *    ApplySettings
+ *
+ * SYNOPSIS:
+ *    void ApplySettings(t_DataProcessorHandleType *DataHandle,
+ *              t_PIKVList *Settings);
+ *
+ * PARAMETERS:
+ *    DataHandle [I] -- The data handle to work on.  This is your internal
+ *                      data.
+ *    Settings [I] -- This is where you get your settings from.
+ *
+ * FUNCTION:
+ *    This function takes the settings from 'Settings' and setups the
+ *    plugin to use them when new bytes come in or out.  It will normally
+ *    copy the settings from key/value pairs to internal data structures.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    
+ ******************************************************************************/
 static void TextLineHighlighter_ApplySettings(t_DataProcessorHandleType *DataHandle,
         t_PIKVList *Settings)
 {
     struct TextLineHighlighterData *Data=(struct TextLineHighlighterData *)DataHandle;
-    const char *UseSimpleHighlighteringStr;
-    bool UseSimpleHighlightering;
-    const char *SimpleHighlighter_StartingWith;
-    const char *SimpleHighlighter_EndingWith;
-    const char *SimpleHighlighter_Contains;
-    const char *RegexHighlighter_RemoveEnabledStr;
-    bool RegexHighlighter_RemoveEnabled;
-    const char *RegexHighlighter_RemoveHighlighter1;
-    const char *RegexHighlighter_RemoveHighlighter2;
-    const char *RegexHighlighter_RemoveHighlighter3;
-    const char *RegexHighlighter_RemoveHighlighter4;
-    const char *RegexHighlighter_RemoveHighlighter5;
-    const char *RegexHighlighter_IncludeEnabledStr;
-    bool RegexHighlighter_IncludeEnabled;
-    const char *RegexHighlighter_IncludeHighlighter1;
-    const char *RegexHighlighter_IncludeHighlighter2;
-    const char *RegexHighlighter_IncludeHighlighter3;
-    const char *RegexHighlighter_IncludeHighlighter4;
-    const char *RegexHighlighter_IncludeHighlighter5;
+    const char *Str;
+    int r;
+    char buff[100];
 
-    UseSimpleHighlighteringStr=m_TLF_SysAPI->KVGetItem(Settings,"UseSimpleHighlightering");
-    SimpleHighlighter_StartingWith=m_TLF_SysAPI->KVGetItem(Settings,"SimpleHighlighter_StartingWith");
-    SimpleHighlighter_EndingWith=m_TLF_SysAPI->KVGetItem(Settings,"SimpleHighlighter_EndingWith");
-    SimpleHighlighter_Contains=m_TLF_SysAPI->KVGetItem(Settings,"SimpleHighlighter_Contains");
-    RegexHighlighter_RemoveEnabledStr=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveEnabled");
-    RegexHighlighter_RemoveHighlighter1=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter1");
-    RegexHighlighter_RemoveHighlighter2=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter2");
-    RegexHighlighter_RemoveHighlighter3=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter3");
-    RegexHighlighter_RemoveHighlighter4=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter4");
-    RegexHighlighter_RemoveHighlighter5=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_RemoveHighlighter5");
-    RegexHighlighter_IncludeEnabledStr=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeEnabled");
-    RegexHighlighter_IncludeHighlighter1=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter1");
-    RegexHighlighter_IncludeHighlighter2=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter2");
-    RegexHighlighter_IncludeHighlighter3=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter3");
-    RegexHighlighter_IncludeHighlighter4=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter4");
-    RegexHighlighter_IncludeHighlighter5=m_TLF_SysAPI->KVGetItem(Settings,"RegexHighlighter_IncludeHighlighter5");
+    for(r=0;r<NUM_OF_SIMPLE;r++)
+    {
+        sprintf(buff,"SimpleStart%d",r);
+        Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+        if(Str==NULL)
+            Str="";
+        Data->Simple[r].StartsWith=Str;
 
-    /* Set defaults */
-    if(UseSimpleHighlighteringStr==NULL)
-        UseSimpleHighlighteringStr="1";
-    if(SimpleHighlighter_StartingWith==NULL)
-        SimpleHighlighter_StartingWith="";
-    if(SimpleHighlighter_EndingWith==NULL)
-        SimpleHighlighter_EndingWith="";
-    if(SimpleHighlighter_Contains==NULL)
-        SimpleHighlighter_Contains="";
-    if(RegexHighlighter_RemoveEnabledStr==NULL)
-        RegexHighlighter_RemoveEnabledStr="0";
-    if(RegexHighlighter_RemoveHighlighter1==NULL)
-        RegexHighlighter_RemoveHighlighter1="";
-    if(RegexHighlighter_RemoveHighlighter2==NULL)
-        RegexHighlighter_RemoveHighlighter2="";
-    if(RegexHighlighter_RemoveHighlighter3==NULL)
-        RegexHighlighter_RemoveHighlighter3="";
-    if(RegexHighlighter_RemoveHighlighter4==NULL)
-        RegexHighlighter_RemoveHighlighter4="";
-    if(RegexHighlighter_RemoveHighlighter5==NULL)
-        RegexHighlighter_RemoveHighlighter5="";
-    if(RegexHighlighter_IncludeEnabledStr==NULL)
-        RegexHighlighter_IncludeEnabledStr="0";
-    if(RegexHighlighter_IncludeHighlighter1==NULL)
-        RegexHighlighter_IncludeHighlighter1="";
-    if(RegexHighlighter_IncludeHighlighter2==NULL)
-        RegexHighlighter_IncludeHighlighter2="";
-    if(RegexHighlighter_IncludeHighlighter3==NULL)
-        RegexHighlighter_IncludeHighlighter3="";
-    if(RegexHighlighter_IncludeHighlighter4==NULL)
-        RegexHighlighter_IncludeHighlighter4="";
-    if(RegexHighlighter_IncludeHighlighter5==NULL)
-        RegexHighlighter_IncludeHighlighter5="";
+        sprintf(buff,"SimpleContains%d",r);
+        Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+        if(Str==NULL)
+            Str="";
+        Data->Simple[r].Contains=Str;
 
-    UseSimpleHighlightering=atoi(UseSimpleHighlighteringStr);
-    RegexHighlighter_RemoveEnabled=atoi(RegexHighlighter_RemoveEnabledStr);
-    RegexHighlighter_IncludeEnabled=atoi(RegexHighlighter_IncludeEnabledStr);
+        sprintf(buff,"SimpleEnd%d",r);
+        Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+        if(Str==NULL)
+            Str="";
+        Data->Simple[r].EndsWith=Str;
 
-    Data->UseSimpleHighlighters=UseSimpleHighlightering;
-    Data->SimpleHighlighterStartsWith=SimpleHighlighter_StartingWith;
-    Data->SimpleHighlighterEndsWith=SimpleHighlighter_EndingWith;
-    Data->SimpleHighlighterContains=SimpleHighlighter_Contains;
+        sprintf(buff,"SimpleStyle%d",r);
+        Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+        if(Str==NULL)
+            Str="0";
+        Data->Simple[r].StyleIndex=atoi(Str);
+    }
 
-    Data->RegexRemoveEnabled=RegexHighlighter_RemoveEnabled;
-    Data->RegexRemoveHighlighter1=RegexHighlighter_RemoveHighlighter1;
-    Data->RegexRemoveHighlighter2=RegexHighlighter_RemoveHighlighter2;
-    Data->RegexRemoveHighlighter3=RegexHighlighter_RemoveHighlighter3;
-    Data->RegexRemoveHighlighter4=RegexHighlighter_RemoveHighlighter4;
-    Data->RegexRemoveHighlighter5=RegexHighlighter_RemoveHighlighter5;
+    for(r=0;r<NUM_OF_REGEXS;r++)
+    {
+        sprintf(buff,"RegexStr%d",r);
+        Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
 
-    Data->RegexIncludeEnabled=RegexHighlighter_IncludeEnabled;
-    Data->RegexIncludeHighlighter1=RegexHighlighter_IncludeHighlighter1;
-    Data->RegexIncludeHighlighter2=RegexHighlighter_IncludeHighlighter2;
-    Data->RegexIncludeHighlighter3=RegexHighlighter_IncludeHighlighter3;
-    Data->RegexIncludeHighlighter4=RegexHighlighter_IncludeHighlighter4;
-    Data->RegexIncludeHighlighter5=RegexHighlighter_IncludeHighlighter5;
+        if(Str==NULL)
+            Str="";
+
+        Data->Regex[r].Pattern=Str;
+
+        sprintf(buff,"RegexStyle%d",r);
+        Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+        if(Str==NULL)
+            Str="0";
+        Data->Regex[r].StyleIndex=atoi(Str);
+    }
+
+    /* Styling tabs (colors) */
+    for(r=0;r<NUM_OF_STYLES;r++)
+    {
+        sprintf(buff,"Colors%d",r);
+        TextLineHighlighter_ApplySetting_SetData(Settings,&Data->Styles[r],buff,
+                r);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_AddSettingStyleWidgets
+ *
+ * SYNOPSIS:
+ *    static void TextLineHighlighter_AddSettingStyleWidgets(
+ *          struct SettingsStylingWidgetsSet *Widgets,
+ *          t_WidgetSysHandle *SysHandle);
+ *
+ * PARAMETERS:
+ *    Widgets [O] -- Where to store the pointers to the widgets
+ *    SysHandle [I] -- The widget handle to use when adding the widgets.
+ *
+ * FUNCTION:
+ *    This is a helper function that allocates a set of styling widgets.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * NOTES:
+ *    Will throw(0) if there is an error.
+ *
+ * SEE ALSO:
+ *    
+ ******************************************************************************/
+static void TextLineHighlighter_AddSettingStyleWidgets(
+        struct SettingsStylingWidgetsSet *Widgets,
+        t_WidgetSysHandle *SysHandle)
+{
+    Widgets->FgColor=m_TLF_UIAPI->AddColorPick(SysHandle,"Forground Color",0x000000,NULL,NULL);
+    if(Widgets->FgColor==NULL)
+        throw(0);
+
+    Widgets->BgColor=m_TLF_UIAPI->AddColorPick(SysHandle,"Background Color",0x000000,NULL,NULL);
+    if(Widgets->BgColor==NULL)
+        throw(0);
+
+    Widgets->AttribUnderLine=m_TLF_UIAPI->AddCheckbox(SysHandle,"Underline",NULL,NULL);
+    if(Widgets->AttribUnderLine==NULL)
+        throw(0);
+
+    Widgets->AttribOverLine=m_TLF_UIAPI->AddCheckbox(SysHandle,"Overline",NULL,NULL);
+    if(Widgets->AttribOverLine==NULL)
+        throw(0);
+
+    Widgets->AttribLineThrough=m_TLF_UIAPI->AddCheckbox(SysHandle,"Line through",NULL,NULL);
+    if(Widgets->AttribLineThrough==NULL)
+        throw(0);
+
+    Widgets->AttribBold=m_TLF_UIAPI->AddCheckbox(SysHandle,"Bold",NULL,NULL);
+    if(Widgets->AttribBold==NULL)
+        throw(0);
+
+    Widgets->AttribItalic=m_TLF_UIAPI->AddCheckbox(SysHandle,"Italic",NULL,NULL);
+    if(Widgets->AttribItalic==NULL)
+        throw(0);
+
+    Widgets->AttribOutLine=m_TLF_UIAPI->AddCheckbox(SysHandle,"Outline",NULL,NULL);
+    if(Widgets->AttribOutLine==NULL)
+        throw(0);
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_FreeSettingStyleWidgets
+ *
+ * SYNOPSIS:
+ *    static void TextLineHighlighter_FreeSettingStyleWidgets(
+ *          struct SettingsStylingWidgetsSet *Widgets,
+ *          t_WidgetSysHandle *SysHandle);
+ *
+ * PARAMETERS:
+ *    Widgets [I] -- The widgets style set to free
+ *    SysHandle [I] -- The widget system handle use to allocate these widgets.
+ *
+ * FUNCTION:
+ *    This function frees the widgets that was allocated with
+ *    TextLineHighlighter_AddSettingStyleWidgets()
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    TextLineHighlighter_AddSettingStyleWidgets()
+ ******************************************************************************/
+static void TextLineHighlighter_FreeSettingStyleWidgets(
+        struct SettingsStylingWidgetsSet *Widgets,
+        t_WidgetSysHandle *SysHandle)
+{
+    if(Widgets->AttribOutLine!=NULL)
+        m_TLF_UIAPI->FreeCheckbox(SysHandle,Widgets->AttribOutLine);
+    if(Widgets->AttribItalic!=NULL)
+        m_TLF_UIAPI->FreeCheckbox(SysHandle,Widgets->AttribItalic);
+    if(Widgets->AttribBold!=NULL)
+        m_TLF_UIAPI->FreeCheckbox(SysHandle,Widgets->AttribBold);
+    if(Widgets->AttribLineThrough!=NULL)
+        m_TLF_UIAPI->FreeCheckbox(SysHandle,Widgets->AttribLineThrough);
+    if(Widgets->AttribOverLine!=NULL)
+        m_TLF_UIAPI->FreeCheckbox(SysHandle,Widgets->AttribOverLine);
+    if(Widgets->AttribUnderLine!=NULL)
+        m_TLF_UIAPI->FreeCheckbox(SysHandle,Widgets->AttribUnderLine);
+
+    if(Widgets->BgColor!=NULL)
+        m_TLF_UIAPI->FreeColorPick(SysHandle,Widgets->BgColor);
+    if(Widgets->FgColor!=NULL)
+        m_TLF_UIAPI->FreeColorPick(SysHandle,Widgets->FgColor);
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_SetSettingStyleWidgets
+ *
+ * SYNOPSIS:
+ *    static void TextLineHighlighter_SetSettingStyleWidgets(t_PIKVList *Settings,
+ *          struct SettingsStylingWidgetsSet *Widgets,
+ *          t_WidgetSysHandle *SysHandle,const char *Prefix,
+ *          uint32_t DefaultStyleSet)
+ *
+ * PARAMETERS:
+ *    Settings [I] -- The settings to apply
+ *    Widgets [I] -- The widget set to set to the settings
+ *    SysHandle [I] -- The widget system handle that these widgets where added
+ *                     with.
+ *    Prefix [I] -- The prefix for the styling names in the settings.  This
+ *                  function will take this string and add it to the start
+ *                  of the setting KV name before trying to read it from
+ *                  settings.
+ *    DefaultStyleSet [I] -- The default colors and style to use if a setting
+ *                           isn't found in settings.
+ *
+ * FUNCTION:
+ *    This is a helper function that reads the styling widgets out of settings
+ *    and applies it to the widgets.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    
+ ******************************************************************************/
+static void TextLineHighlighter_SetSettingStyleWidgets(t_PIKVList *Settings,
+        struct SettingsStylingWidgetsSet *Widgets,t_WidgetSysHandle *SysHandle,
+        const char *Prefix,uint32_t DefaultStyleSet)
+{
+    uint32_t Num;
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"FGColor",
+            m_DefaultStyleSets[DefaultStyleSet].FGColor,16);
+    m_TLF_UIAPI->SetColorPickValue(SysHandle,Widgets->FgColor->Ctrl,Num);
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"BGColor",
+            m_DefaultStyleSets[DefaultStyleSet].BGColor,16);
+    m_TLF_UIAPI->SetColorPickValue(SysHandle,Widgets->BgColor->Ctrl,Num);
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribUnderLine",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_UNDERLINE,10);
+    m_TLF_UIAPI->SetCheckboxChecked(SysHandle,Widgets->AttribUnderLine->Ctrl,
+            Num?true:false);
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribOverLine",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_OVERLINE,10);
+    m_TLF_UIAPI->SetCheckboxChecked(SysHandle,Widgets->AttribOverLine->Ctrl,
+            Num?true:false);
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribLineThrough",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_LINETHROUGH,10);
+    m_TLF_UIAPI->SetCheckboxChecked(SysHandle,Widgets->AttribLineThrough->Ctrl,
+            Num?true:false);
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribBold",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_BOLD,10);
+    m_TLF_UIAPI->SetCheckboxChecked(SysHandle,Widgets->AttribBold->Ctrl,
+            Num?true:false);
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribItalic",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_ITALIC,10);
+    m_TLF_UIAPI->SetCheckboxChecked(SysHandle,Widgets->AttribItalic->Ctrl,
+            Num?true:false);
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribOutLine",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_OUTLINE,10);
+    m_TLF_UIAPI->SetCheckboxChecked(SysHandle,Widgets->AttribOutLine->Ctrl,
+            Num?true:false);
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_GrabSettingKV
+ *
+ * SYNOPSIS:
+ *    static uint32_t TextLineHighlighter_GrabSettingKV(t_PIKVList *Settings,
+ *          const char *Prefix,const char *Key,uint32_t DefaultValue,int Base);
+ *
+ * PARAMETERS:
+ *    Settings [I] -- The settings to apply
+ *    Prefix [I] -- The prefix for the styling names in the settings.  This
+ *                  function will take this string and add it to the start
+ *                  of the setting KV name before trying to read it from
+ *                  settings.
+ *    Key [I] -- The key to look for in the settings
+ *    DefaultValue [I] -- What value to apply if it wasn't found
+ *    Base [I] -- What number base is the setting value stored as (sent into
+ *                strtol()).
+ *
+ * FUNCTION:
+ *    This is a helper function for TextLineHighlighter_SetSettingStyleWidgets()
+ *    that tries to find a setting and if it's not found applies a default
+ *    value.
+ *
+ * RETURNS:
+ *    The value that was in settings or 'DefaultValue' if it was not found.
+ *
+ * SEE ALSO:
+ *    TextLineHighlighter_SetSettingStyleWidgets()
+ ******************************************************************************/
+static uint32_t TextLineHighlighter_GrabSettingKV(t_PIKVList *Settings,
+        const char *Prefix,const char *Key,uint32_t DefaultValue,int Base)
+{
+    char buff[100];
+    const char *Str;
+    uint32_t Number;
+
+    sprintf(buff,"%s_%s",Prefix,Key);
+    Str=m_TLF_SysAPI->KVGetItem(Settings,buff);
+    if(Str!=NULL)
+        Number=strtol(Str,NULL,Base);
+    else
+        Number=DefaultValue;
+
+    return Number;
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_UpdateSettingFromStyleWidgets
+ *
+ * SYNOPSIS:
+ *    static void TextLineHighlighter_UpdateSettingFromStyleWidgets(
+ *          t_PIKVList *Settings,struct SettingsStylingWidgetsSet *Widgets,
+ *          t_WidgetSysHandle *SysHandle,const char *Prefix);
+ *
+ * PARAMETERS:
+ *    Settings [O] -- The settings to set the data in
+ *    Widgets [I] -- The widgets to read the data from
+ *    SysHandle [I] -- The widget system handle that these widgets where added
+ *                     with.
+ *    Prefix [I] -- The prefix for the styling names in the settings.  This
+ *                  function will take this string and add it to the start
+ *                  of the setting KV name before trying to read it from
+ *                  settings.
+ *
+ * FUNCTION:
+ *    This function takes and reads the values from the widgets and put them
+ *    in 'Settings'.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    
+ ******************************************************************************/
+static void TextLineHighlighter_UpdateSettingFromStyleWidgets(t_PIKVList *Settings,
+        struct SettingsStylingWidgetsSet *Widgets,t_WidgetSysHandle *SysHandle,
+        const char *Prefix)
+{
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"FGColor",
+            m_TLF_UIAPI->GetColorPickValue(SysHandle,Widgets->FgColor->Ctrl),
+            16);
+
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"BGColor",
+            m_TLF_UIAPI->GetColorPickValue(SysHandle,Widgets->BgColor->Ctrl),
+            16);
+
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"AttribUnderLine",
+            m_TLF_UIAPI->IsCheckboxChecked(SysHandle,
+            Widgets->AttribUnderLine->Ctrl),16);
+
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"AttribOverLine",
+            m_TLF_UIAPI->IsCheckboxChecked(SysHandle,
+            Widgets->AttribOverLine->Ctrl),16);
+
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"AttribLineThrough",
+            m_TLF_UIAPI->IsCheckboxChecked(SysHandle,
+            Widgets->AttribLineThrough->Ctrl),16);
+
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"AttribBold",
+            m_TLF_UIAPI->IsCheckboxChecked(SysHandle,
+            Widgets->AttribBold->Ctrl),16);
+
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"AttribItalic",
+            m_TLF_UIAPI->IsCheckboxChecked(SysHandle,
+            Widgets->AttribItalic->Ctrl),16);
+
+    TextLineHighlighter_SetSettingKV(Settings,Prefix,"AttribOutLine",
+            m_TLF_UIAPI->IsCheckboxChecked(SysHandle,
+            Widgets->AttribOutLine->Ctrl),16);
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_SetSettingKV
+ *
+ * SYNOPSIS:
+ *    static void TextLineHighlighter_SetSettingKV(t_PIKVList *Settings,
+ *              const char *Prefix,const char *Key,uint32_t Value,int Base);
+ *
+ * PARAMETERS:
+ *    Settings [O] -- The settings to set the data in
+ *    Prefix [I] -- The prefix for the styling names in the settings.  This
+ *                  function will take this string and add it to the start
+ *                  of the setting KV name before trying to read it from
+ *                  settings.
+ *    Key [I] -- The key to look for in the settings
+ *    Value [I] -- The value to store
+ *    Base [I] -- What number base is the setting value stored as.
+ *
+ * FUNCTION:
+ *    This is a helper function for
+ *    TextLineHighlighter_UpdateSettingFromStyleWidgets() that sets the value in
+ *    'Settings'.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    TextLineHighlighter_UpdateSettingFromStyleWidgets()
+ ******************************************************************************/
+static void TextLineHighlighter_SetSettingKV(t_PIKVList *Settings,
+        const char *Prefix,const char *Key,uint32_t Value,int Base)
+{
+    char buff[100];
+    char buff2[100];
+
+    sprintf(buff,"%s_%s",Prefix,Key);
+    if(Base==10)
+        sprintf(buff2,"%d",Value);
+    else
+        sprintf(buff2,"%06X",Value);
+    m_TLF_SysAPI->KVAddItem(Settings,buff,buff2);
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_ApplySetting_SetData
+ *
+ * SYNOPSIS:
+ *    static void TextLineHighlighter_ApplySetting_SetData(t_PIKVList *Settings,
+ *              struct TextLineHighlighter_TextStyle *Style,const char *Prefix,
+ *              uint32_t DefaultStyleSet);
+ *
+ * PARAMETERS:
+ *    Settings [I] -- The settings to read out
+ *    Style [O] -- The style to be set to what is in 'Settings'
+ *    Prefix [I] -- The prefix for the styling names in the settings.  This
+ *                  function will take this string and add it to the start
+ *                  of the setting KV name before trying to read it from
+ *                  settings.
+ *    DefaultStyleSet [I] -- The default colors and style to use if a setting
+ *                           isn't found in settings.
+ *
+ * FUNCTION:
+ *    This function takes the settings in 'Settings' copies / converts then
+ *    to the styling in 'Style'.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    
+ ******************************************************************************/
+static void TextLineHighlighter_ApplySetting_SetData(t_PIKVList *Settings,
+        struct TextLineHighlighter_TextStyle *Style,const char *Prefix,
+        uint32_t DefaultStyleSet)
+{
+    uint32_t Num;
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"FGColor",
+            m_DefaultStyleSets[DefaultStyleSet].FGColor,16);
+    Style->FGColor=Num;
+
+    Num=TextLineHighlighter_GrabSettingKV(Settings,Prefix,"BGColor",
+            m_DefaultStyleSets[DefaultStyleSet].BGColor,16);
+    Style->BGColor=Num;
+
+    Style->Attribs=0;
+    if(TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribUnderLine",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_UNDERLINE,
+            10))
+    {
+        Style->Attribs|=TXT_ATTRIB_UNDERLINE;
+    }
+
+    if(TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribOverLine",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_OVERLINE,
+            10))
+    {
+        Style->Attribs|=TXT_ATTRIB_OVERLINE;
+    }
+
+    if(TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribLineThrough",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_LINETHROUGH,
+            10))
+    {
+        Style->Attribs|=TXT_ATTRIB_LINETHROUGH;
+    }
+
+    if(TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribBold",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_BOLD,
+            10))
+    {
+        Style->Attribs|=TXT_ATTRIB_BOLD;
+    }
+
+    if(TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribItalic",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_ITALIC,
+            10))
+    {
+        Style->Attribs|=TXT_ATTRIB_ITALIC;
+    }
+
+    if(TextLineHighlighter_GrabSettingKV(Settings,Prefix,"AttribOutLine",
+            m_DefaultStyleSets[DefaultStyleSet].Attribs&TXT_ATTRIB_OUTLINE,
+            10))
+    {
+        Style->Attribs|=TXT_ATTRIB_OUTLINE;
+    }
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_HandleLine
+ *
+ * SYNOPSIS:
+ *    void TextLineHighlighter_HandleLine(struct TextLineHighlighterData *Data);
+ *
+ * PARAMETERS:
+ *    Data [I] -- Our data
+ *
+ * FUNCTION:
+ *    This function handles when we finish reading a line.  It will check
+ *    for any matches and color the line as needed.
+ *
+ *    It will then reset the mark.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    
+ ******************************************************************************/
+static void TextLineHighlighter_HandleLine(struct TextLineHighlighterData *Data)
+{
+    const uint8_t *Line;
+    uint32_t Bytes;
+    int r;
+    size_t Len;
+
+    if(Data->StartOfLineMarker==NULL)
+        return;
+
+    Line=m_TLF_DPS->GetMarkString(Data->StartOfLineMarker,&Bytes,0,0);
+    if(Line==NULL)
+    {
+        Data->GrabNewMark=true;
+        return;
+    }
+
+    for(r=0;r<NUM_OF_SIMPLE;r++)
+    {
+        if(!Data->Simple[r].StartsWith.empty())
+        {
+            Len=Data->Simple[r].StartsWith.length();
+            if(strncmp((char *)Line,Data->Simple[r].StartsWith.c_str(),Len)==0)
+            {
+                TextLineHighlighter_ApplyStyleSet2Marker(Data,
+                        Data->Simple[r].StyleIndex);
+            }
+        }
+        if(!Data->Simple[r].Contains.empty())
+        {
+            if(strstr((char *)Line,Data->Simple[r].Contains.c_str())!=NULL)
+            {
+                TextLineHighlighter_ApplyStyleSet2Marker(Data,
+                        Data->Simple[r].StyleIndex);
+            }
+        }
+        if(!Data->Simple[r].EndsWith.empty())
+        {
+            Len=Data->Simple[r].EndsWith.length();
+            if(Bytes>=Len && strcmp((char *)&Line[Bytes-Len],
+                    Data->Simple[r].EndsWith.c_str())==0)
+            {
+                TextLineHighlighter_ApplyStyleSet2Marker(Data,
+                        Data->Simple[r].StyleIndex);
+            }
+        }
+    }
+
+    for(r=0;r<NUM_OF_REGEXS;r++)
+    {
+        if(!Data->Regex[r].Pattern.empty())
+        {
+            regex RxPattern(Data->Regex[r].Pattern);
+            if(regex_search((const char *)Line,RxPattern))
+            {
+                TextLineHighlighter_ApplyStyleSet2Marker(Data,
+                    Data->Regex[r].StyleIndex);
+            }
+        }
+    }
+
+    /* Ok, reset the mark */
+    Data->GrabNewMark=true;
+}
+
+/*******************************************************************************
+ * NAME:
+ *    TextLineHighlighter_ApplyStyleSet2Marker
+ *
+ * SYNOPSIS:
+ *    static void TextLineHighlighter_ApplyStyleSet2Marker(struct TextLineHighlighterData *Data,
+ *              int StyleIndex);
+ *
+ * PARAMETERS:
+ *    Data [I] -- Our data
+ *    StyleIndex [I] -- The index of the style to apply.
+ *
+ * FUNCTION:
+ *    This function applies a style to the current marker to the cursor.
+ *
+ * RETURNS:
+ *    NONE
+ *
+ * SEE ALSO:
+ *    
+ ******************************************************************************/
+static void TextLineHighlighter_ApplyStyleSet2Marker(struct TextLineHighlighterData *Data,
+        int StyleIndex)
+{
+    m_TLF_DPS->ApplyAttrib2Mark(Data->StartOfLineMarker,
+            Data->Styles[StyleIndex].Attribs,0,0);
+    m_TLF_DPS->ApplyFGColor2Mark(Data->StartOfLineMarker,
+            Data->Styles[StyleIndex].FGColor,0,0);
+    m_TLF_DPS->ApplyBGColor2Mark(Data->StartOfLineMarker,
+            Data->Styles[StyleIndex].BGColor,0,0);
 }

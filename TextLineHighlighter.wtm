@@ -1,12 +1,12 @@
 <?xml version="1.0" standalone="no" ?>
 <ExternPluginMaker>
-    <LastBuildFile></LastBuildFile>
-    <LinuxFilename></LinuxFilename>
+    <LastBuildFile>/home/paul/Dropbox/Projects/WhippyTerm/WhippyTermPlugin_TextLineHighlighter/TextLineHighlighter.wtp</LastBuildFile>
+    <LinuxFilename>/home/paul/Dropbox/Projects/WhippyTerm/WhippyTermPlugin_TextLineHighlighter/Linux/TextLineHighlighter.so</LinuxFilename>
     <WindowsFilename></WindowsFilename>
     <MacFilename></MacFilename>
     <RPI64Filename></RPI64Filename>
     <RPI32Filename></RPI32Filename>
-    <PluginName>Text Line Filter</PluginName>
+    <PluginName>Text Line Highlighter</PluginName>
     <InstallFilename>TextLineHighlighter</InstallFilename>
     <Description>Highlights lines using regex's or a simple string matching.</Description>
     <Contributors>Paul Hutchinson</Contributors>
@@ -15,5 +15,5 @@
     <Version>1.0</Version>
     <APIVersion>2.0</APIVersion>
     <PluginClass>1</PluginClass>
-    <PluginSubClass>4</PluginSubClass>
+    <PluginSubClass>2</PluginSubClass>
 </ExternPluginMaker>
