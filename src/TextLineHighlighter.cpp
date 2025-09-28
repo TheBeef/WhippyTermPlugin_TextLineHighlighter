@@ -182,7 +182,9 @@ struct DataProcessorInfo m_TextLineHighlighter_Info=
     "Highlights lines using regex's or a simple string matching.",
     "Highlights lines using regex's or a simple string matching.",
     e_DataProcessorType_Text,
-    .TxtClass=e_TextDataProcessorClass_Highlighter,
+    {
+        .TxtClass=e_TextDataProcessorClass_Highlighter,
+    },
     e_BinaryDataProcessorMode_Hex
 };
 
